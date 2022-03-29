@@ -1,0 +1,34 @@
+name:                systemd-xsession
+version:             0.1.0.0
+github:              "/jathibodeau/systemd-xsession"
+license:             BSD3
+author:              "John Thibodeau"
+maintainer:          "jthibo@gmail.com"
+copyright:           ""
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description: Please see the README on GitHub at <https://github.com/jathibodeau/systemd-xsession#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- dbus
+
+executables:
+  systemd-xsession:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -O3
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
