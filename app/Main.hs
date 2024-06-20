@@ -2,12 +2,14 @@
 
 module Main where
 
-import Control.Concurrent.MVar
 import DBus
 import DBus.Client
-import Data.Either
-import Data.Maybe
-import System.Environment
+import Data.Either (fromRight)
+import Data.Either.Extra (eitherToMaybe)
+import Data.Maybe (listToMaybe)
+import System.Environment (getEnvironment)
+import Control.Concurrent.STM (TMVar, newEmptyTMVarIO, putTMVar, writeTMVar, takeTMVar, readTMVar, atomically)
+import Control.Monad (join)
 
 xsessionTarget = "xsession.target" :: String
 
@@ -21,25 +23,38 @@ sysdManagerDest = "org.freedesktop.systemd1"
 
 main :: IO ()
 main = do
-  sigVar <- newEmptyMVar
+  sigVar <- newEmptyTMVarIO    :: IO (TMVar String)
+  reloadVar <- newEmptyTMVarIO :: IO (TMVar Bool)
   client <- connectSession
   sysdEnvs <- getProperty client sysdGetEnvironment
   getEnvironment >>= call_ client . sysdSetEnvironment
   call_ client $ sysdUpdateEnvV sysdEnvs
-  addMatch client unitRemovedMatch $ putMVar sigVar
+  addMatch client unitRemovedMatch
+    $ mapM_ (atomically . putTMVar sigVar) . getFirstSignalArg
+  addMatch client sysdReloadMatch
+    $ mapM_ (atomically . writeTMVar reloadVar) . getFirstSignalArg
   call_ client $ sysdSubscribe
   call_ client $ sysdStartUnit xsessionTarget
-  waitForUnitExit sigVar xsessionTarget
+  waitForUnitExit sigVar reloadVar xsessionTarget
   call_ client $ sysdStopUnit graphicalTarget
   return ()
 
-waitForUnitExit :: MVar Signal -> String -> IO ()
-waitForUnitExit sigVar unit = takeMVar sigVar >>= waitUnit sigVar unit
-  where
-    waitUnit sigVar unit sig
-      | (getUnitArg sig >>= fromVariant) == Just unit = return ()
-      | otherwise = waitForUnitExit sigVar unit
-    getUnitArg = listToMaybe . signalBody
+variantEnvToKV :: Either MethodError Variant -> Maybe [(String, String)]
+variantEnvToKV evar = do
+  var <- eitherToMaybe evar
+  envList <- concat <$> (fromVariant var :: Maybe [String])
+  return []
+
+getFirstSignalArg :: IsVariant b => Signal -> Maybe b
+getFirstSignalArg sig = (listToMaybe . signalBody $ sig) >>= fromVariant
+
+waitForUnitExit :: TMVar String -> TMVar Bool -> String -> IO ()
+waitForUnitExit sigVar reloadVar unit = join $ atomically $ do
+  removedUnit <- takeTMVar sigVar
+  isReloading <- readTMVar reloadVar
+  if removedUnit == unit && not isReloading
+    then return $ return ()
+    else return $ waitForUnitExit sigVar reloadVar unit
 
 sysdManagerCall :: MemberName -> [Variant] -> MethodCall
 sysdManagerCall member body =
@@ -77,4 +92,12 @@ unitRemovedMatch =
     { matchPath = Just sysdManagerPath
     , matchInterface = Just sysdManagerIface
     , matchMember = Just "UnitRemoved"
+    }
+
+sysdReloadMatch :: MatchRule
+sysdReloadMatch =
+  matchAny
+    { matchPath = Just sysdManagerPath
+    , matchInterface = Just sysdManagerIface
+    , matchMember = Just "Reloading"
     }
