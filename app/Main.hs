@@ -3,13 +3,33 @@
 module Main where
 
 import DBus
+    ( methodCall,
+      MethodCall(methodCallBody, methodCallDestination),
+      MethodError,
+      Signal(signalBody),
+      IsVariant(..),
+      MemberName,
+      Variant )
 import DBus.Client
-import Data.Either (fromRight)
-import Data.Either.Extra (eitherToMaybe)
-import Data.Maybe (listToMaybe)
-import System.Environment (getEnvironment)
-import Control.Concurrent.STM (TMVar, newEmptyTMVarIO, putTMVar, writeTMVar, takeTMVar, readTMVar, atomically)
-import Control.Monad (join)
+    ( addMatch,
+      call_,
+      connectSession,
+      getProperty,
+      matchAny,
+      MatchRule(matchMember, matchPath, matchInterface) )
+import Data.Either ( fromRight )
+import Data.Maybe ( listToMaybe )
+import System.Environment ( getEnvironment )
+import Control.Concurrent.STM
+    ( atomically,
+      retry,
+      newEmptyTMVarIO,
+      putTMVar,
+      readTMVar,
+      takeTMVar,
+      writeTMVar,
+      TMVar )
+import Control.Monad ( unless )
 
 xsessionTarget = "xsession.target" :: String
 
@@ -39,22 +59,20 @@ main = do
   call_ client $ sysdStopUnit graphicalTarget
   return ()
 
-variantEnvToKV :: Either MethodError Variant -> Maybe [(String, String)]
-variantEnvToKV evar = do
-  var <- eitherToMaybe evar
-  envList <- concat <$> (fromVariant var :: Maybe [String])
-  return []
+-- variantEnvToKV :: Either MethodError Variant -> Maybe [(String, String)]
+-- variantEnvToKV evar = do
+--   var <- eitherToMaybe evar
+--   envList <- concat <$> (fromVariant var :: Maybe [String])
+--   return []
 
 getFirstSignalArg :: IsVariant b => Signal -> Maybe b
 getFirstSignalArg sig = (listToMaybe . signalBody $ sig) >>= fromVariant
 
 waitForUnitExit :: TMVar String -> TMVar Bool -> String -> IO ()
-waitForUnitExit sigVar reloadVar unit = join $ atomically $ do
+waitForUnitExit sigVar reloadVar unit = atomically $ do
   removedUnit <- takeTMVar sigVar
   isReloading <- readTMVar reloadVar
-  if removedUnit == unit && not isReloading
-    then return $ return ()
-    else return $ waitForUnitExit sigVar reloadVar unit
+  unless (removedUnit == unit && not isReloading) retry
 
 sysdManagerCall :: MemberName -> [Variant] -> MethodCall
 sysdManagerCall member body =
