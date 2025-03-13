@@ -29,7 +29,7 @@ import Control.Concurrent.STM
       takeTMVar,
       writeTMVar,
       TMVar )
-import Control.Monad ( unless )
+import Control.Monad ( when )
 
 xsessionTarget = "xsession.target" :: String
 
@@ -72,7 +72,7 @@ waitForUnitExit :: TMVar String -> TMVar Bool -> String -> IO ()
 waitForUnitExit sigVar reloadVar unit = atomically $ do
   removedUnit <- takeTMVar sigVar
   isReloading <- readTMVar reloadVar
-  unless (removedUnit == unit && not isReloading) retry
+  when (removedUnit /= unit || isReloading) retry
 
 sysdManagerCall :: MemberName -> [Variant] -> MethodCall
 sysdManagerCall member body =
